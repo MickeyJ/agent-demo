@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     gen_max_tokens: int = 1024  # per-response generation cap
     max_tool_loops: int = 5  # circuit breaker: agent→tools round trips per user turn
 
+    # Context budgets (stage 4). Small on purpose — you should SEE trimming
+    # happen during a normal play session, not after 300 turns. qwen-chat's
+    # real window is 64k; these bound cost, latency, and prompt discipline.
+    ctx_window_budget: int = 1500  # verbatim recent turns, in ~tokens
+    summary_max_tokens: int = 300  # rolling summary generation cap
+
 
 @lru_cache
 def get_settings() -> Settings:

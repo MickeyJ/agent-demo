@@ -1,38 +1,40 @@
-"""Stage 3: guardrails join the loop.
+"""Stage 4: context management joins the loop.
 
-    START → prepare → agent ⇄ tools
-                        ↓ ↖______
-                     approval    ↘
-                        ↓ (decline)
-                       END-ish (answers calls, back to agent)
+    START → prepare_context → agent ⇄ tools
+                                ↓ ↖ approval
 
-New since stage 2:
-- prepare node: resets the per-turn tool-loop counter (grows into full context
-  management in stage 4).
-- loop breaker in agent: local models can ping-pong tool calls forever; after
-  max_tool_loops the turn ends with a partial-results message instead.
-- approval node: if any requested call has requires_approval, interrupt() pauses
-  the graph — state checkpointed, process free to do anything else — until
-  someone resumes it with a decision. Approve → run the calls; decline → the
-  calls are answered with a refusal ToolMessage (NEVER left unanswered: every
-  tool_call id must get a ToolMessage or the model breaks) and the agent gets
-  to respond gracefully.
+State grew two fields, and the assembled prompt now has four layers:
+
+    [system prompt | pinned facts | rolling summary]  ← one SystemMessage
+    [trimmed recent messages]                         ← the window
+
+prepare_context runs once per user turn: trims the window to budget, folds
+whatever fell out into the rolling summary (utility model), and removes the
+evicted messages from checkpointed state (RemoveMessage). So state itself
+stays small — the summary IS the memory of everything old.
+
+The checkpointer is SQLite now: kill the process, restart, /thread back —
+the conversation, summary, and pinned facts are all still there.
 """
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
-from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.messages.modifier import RemoveMessage
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import Command, interrupt
 
+from playtime.context import evicted_messages, trim_window, update_summary
 from playtime.llm import make_llm
 from playtime.settings import get_settings
 from playtime.toolkit import execute
-from playtime.tools import TOOLS
+from playtime.tools import REMEMBER_FACT, TOOLS
 
 SYSTEM_PROMPT = (
     "You are a concise, friendly assistant in a terminal chat. You have tools; "
@@ -51,25 +53,51 @@ DECLINED_MSG = (
 )
 
 
+def merge_pinned(a: dict | None, b: dict | None) -> dict:
+    return {**(a or {}), **(b or {})}
+
+
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     tool_loops: int  # no reducer → last write wins
+    summary: str  # rolling digest of evicted turns
+    pinned: Annotated[dict[str, str], merge_pinned]  # remember_fact's target
 
 
-def build_graph():
+def assemble_system(state: AgentState) -> SystemMessage:
+    """Layered prompt, most-stable content first (good for prefix caching)."""
+    parts = [SYSTEM_PROMPT]
+    if state.get("pinned"):
+        facts = "\n".join(f"- {k}: {v}" for k, v in state["pinned"].items())
+        parts.append(f"PINNED FACTS (established earlier, still true):\n{facts}")
+    if state.get("summary"):
+        parts.append(f"CONVERSATION SUMMARY (older turns, verbatim window follows):\n{state['summary']}")
+    return SystemMessage("\n\n".join(parts))
+
+
+def build_graph(checkpointer=None):
     registry = {t.name: t for t in TOOLS}
     llm = make_llm("agent").bind_tools([t.openai_schema() for t in TOOLS])
 
-    def prepare(state: AgentState) -> dict:
-        return {"tool_loops": 0}
+    def prepare_context(state: AgentState) -> dict:
+        out: dict = {"tool_loops": 0}
+        messages = state["messages"]
+        trimmed = trim_window(messages)
+        evicted = evicted_messages(messages, trimmed)
+        if evicted:
+            try:
+                out["summary"] = update_summary(state.get("summary", ""), evicted)
+            except Exception:
+                pass  # degrade, never crash the turn: evict without folding
+            # RemoveMessage is add_messages' delete instruction: these ids
+            # disappear from checkpointed state, not just from this prompt.
+            out["messages"] = [RemoveMessage(id=m.id) for m in evicted if m.id]
+        return out
 
     def agent(state: AgentState) -> dict:
-        resp = llm.invoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
+        resp = llm.invoke([assemble_system(state), *state["messages"]])
         loops = state.get("tool_loops", 0) + (1 if resp.tool_calls else 0)
         if resp.tool_calls and loops > get_settings().max_tool_loops:
-            # Circuit breaker. Replacing the message (not appending) keeps the
-            # window clean: the over-budget tool_calls never enter state, so
-            # there are no orphaned calls to answer.
             partial = resp.text
             resp = AIMessage(content=(partial + "\n\n" if partial else "") + TOOL_BUDGET_MSG)
         return {"messages": [resp], "tool_loops": loops}
@@ -87,9 +115,6 @@ def build_graph():
         last = state["messages"][-1]
         gated = [c for c in last.tool_calls if registry.get(c["name"]) and registry[c["name"]].requires_approval]
         card = "; ".join(f"{c['name']}({c['args']})" for c in gated)
-        # interrupt() checkpoints the graph and raises; the value is surfaced to
-        # whoever invoked us. On resume the NODE RE-RUNS from the top and
-        # interrupt() returns the resume value instead of raising.
         decision = interrupt({"card": card})
         if decision == "approve":
             return Command(goto="tools")
@@ -101,28 +126,41 @@ def build_graph():
 
     def tools(state: AgentState) -> dict:
         last = state["messages"][-1]
-        out = []
+        out: list[ToolMessage] = []
+        pinned: dict[str, str] = {}
         for call in last.tool_calls:
             spec = registry.get(call["name"])
             if spec is None:
                 content = f"ERROR: no tool named {call['name']!r}"
+            elif call["name"] == REMEMBER_FACT:
+                # Special-cased: tools can't reach graph state, the node can.
+                args = call["args"] or {}
+                pinned[str(args.get("key", "fact"))] = str(args.get("value", ""))
+                content = f"Pinned {args.get('key')}."
             else:
-                content = execute(spec, call["args"])  # the guarded path, always
+                content = execute(spec, call["args"])
             out.append(ToolMessage(content=content, tool_call_id=call["id"], name=call["name"]))
-        return {"messages": out}
+        update: dict = {"messages": out}
+        if pinned:
+            update["pinned"] = pinned  # merge_pinned folds it into state
+        return update
 
     g = StateGraph(AgentState)
-    g.add_node("prepare", prepare)
+    g.add_node("prepare_context", prepare_context)
     g.add_node("agent", agent)
     g.add_node("tools", tools)
     g.add_node("approval", approval, destinations=("tools", "agent"))
-    g.add_edge(START, "prepare")
-    g.add_edge("prepare", "agent")
+    g.add_edge(START, "prepare_context")
+    g.add_edge("prepare_context", "agent")
     g.add_conditional_edges(
         "agent", route_after_agent, {"tools": "tools", "approval": "approval", END: END}
     )
     g.add_edge("tools", "agent")
-    return g.compile(checkpointer=MemorySaver())
+    if checkpointer is None:
+        Path("var").mkdir(exist_ok=True)
+        conn = sqlite3.connect("var/checkpoints.sqlite", check_same_thread=False)
+        checkpointer = SqliteSaver(conn)
+    return g.compile(checkpointer=checkpointer)
 
 
 def thread_config(thread_id: str) -> dict:

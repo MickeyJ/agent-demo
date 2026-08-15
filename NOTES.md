@@ -9,8 +9,8 @@ end to end.
 
 1. **Hello, local model** — skeleton, `make_llm(role)`, smoke test, stateless REPL
 2. **The ReAct loop** — LangGraph state/nodes/edges, checkpointer, two raw tools
-3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval ← *you are here*
-4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence
+3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval
+4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence ← *you are here*
 5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent
 6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool
 
@@ -110,4 +110,44 @@ uv run playtime
 # "roll a million dice"        → INVALID_ARGUMENTS → model self-corrects
 # "email bob@x.com hi"         → ⚠ approval card; y runs it (see var/outbox/), n declines
 # MAX_TOOL_LOOPS=0 uv run playtime → budget message on any tool use
+```
+
+## Stage 4 — Context & memory
+
+Files: `context.py` (new), `graph.py` (prepare_context, layered prompt, SQLite),
+`tools.py` (remember_fact), `toolkit.py` (LLM compaction), `main.py` (/debug).
+
+The prompt the model sees each turn is now four layers:
+
+    system prompt          — static rules
+    pinned facts           — verbatim, model-chosen via remember_fact
+    rolling summary        — utility-model digest of evicted turns
+    trimmed window         — recent messages, ≤ ctx_window_budget tokens
+
+What to internalize here:
+
+- **Trimming has invariants.** An AIMessage with tool_calls and its
+  ToolMessages evict together or not at all, and the window never starts with
+  a ToolMessage — `trim_messages(start_on="human")` guarantees both. Violate
+  them and tool-calling models break outright.
+- **Eviction ≠ deletion.** Evicted turns are folded into the rolling summary
+  by the utility model, then removed from checkpointed state via
+  RemoveMessage. Lossy by design; that's the trade.
+- **Two memory mechanisms, different guarantees.** The summary is cheap and
+  lossy; pinned facts are verbatim and survive anything — the model decides
+  what deserves pinning (`remember_fact` is special-cased in the tools node
+  because tools can't touch graph state; nodes can).
+- **Compaction beats truncation.** Oversized tool results now get compressed
+  by the utility model ("preserve all numbers verbatim") instead of chopped.
+- **Persistence is just a checkpointer swap.** MemorySaver → SqliteSaver
+  (var/checkpoints.sqlite); nothing else changed, and threads survive restarts.
+
+Try:
+
+```bash
+CTX_WINDOW_BUDGET=250 uv run playtime   # tiny budget so trimming fires fast
+# "remember my budget is $50"  → ⚙ remember_fact → pinned
+# ask for a few two-sentence stories → watch for the ✂ folded-into-summary line
+# /debug  → the exact layered prompt + per-message token costs
+# /quit, rerun, ask about old details → SQLite persistence
 ```

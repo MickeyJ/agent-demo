@@ -50,6 +50,20 @@ class SendEmailArgs(BaseModel):
     body: str = Field(description="Plain-text body of the email.")
 
 
+REMEMBER_FACT = "remember_fact"
+
+
+class RememberFactArgs(BaseModel):
+    key: str = Field(description="Short snake_case label, e.g. 'user_budget' or 'deadline'.")
+    value: str = Field(description="The fact, verbatim, e.g. '$50 hard cap' or 'Friday 5pm'.")
+
+
+def remember_fact(a: RememberFactArgs) -> str:  # pragma: no cover
+    # Never actually runs: the tools node special-cases this name and writes
+    # to graph state instead (a tool can't reach state; the node can).
+    return f"Pinned {a.key}."
+
+
 OUTBOX = Path("var/outbox")
 
 
@@ -86,6 +100,16 @@ TOOLS = [
         description="Return a poop emoji when something is unclear.",
         args_model=PoopArgs,
         fn=poop,
+    ),
+    ToolSpec(
+        name=REMEMBER_FACT,
+        description=(
+            "Pin a durable fact (name, budget, date, decision) so it survives long "
+            "conversations verbatim. Use immediately when the user establishes one. "
+            "Returns confirmation."
+        ),
+        args_model=RememberFactArgs,
+        fn=remember_fact,
     ),
     ToolSpec(
         name="send_email",

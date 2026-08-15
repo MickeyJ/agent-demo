@@ -69,5 +69,9 @@ def execute(spec: ToolSpec, args: dict) -> str:
         log.warning("tool %s raised: %s", spec.name, e)
         return f"ERROR: {spec.name} failed: {e}"
     if len(raw) > spec.result_cap_chars:
-        raw = raw[: spec.result_cap_chars] + f"\n...[truncated at {spec.result_cap_chars} chars]"
+        # Stage 4: LLM compaction instead of blind truncation — the utility
+        # model shrinks the result while keeping numbers/ids verbatim.
+        from playtime.context import compact_result
+
+        raw = compact_result(raw, spec.result_cap_chars)
     return raw
