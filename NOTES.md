@@ -8,8 +8,8 @@ end to end.
 ## Roadmap
 
 1. **Hello, local model** — skeleton, `make_llm(role)`, smoke test, stateless REPL
-2. **The ReAct loop** — LangGraph state/nodes/edges, checkpointer, two raw tools ← *you are here*
-3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval
+2. **The ReAct loop** — LangGraph state/nodes/edges, checkpointer, two raw tools
+3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval ← *you are here*
 4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence
 5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent
 6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool
@@ -77,3 +77,37 @@ uv run playtime
 
 Planted flaws to find (stage 3 fixes them): tools have no timeout, no arg
 limits, no result caps — "roll a million dice" hangs the whole turn.
+
+## Stage 3 — Tool contract + guardrails
+
+Files: `toolkit.py` (new), `tools.py` (rewritten to ToolSpecs), `graph.py`
+(prepare/approval nodes, loop breaker), `main.py` (approval prompt).
+
+What to internalize here:
+
+- **One guarded execution path.** `toolkit.execute()` owns validation, timeout,
+  error capture, and result caps; tool functions stay dumb (args in, string
+  out). Guardrails live in the contract, not in each tool.
+- **Errors are results, not exceptions.** INVALID_ARGUMENTS, timeouts, and
+  crashes all come back as the ToolMessage text. The model reads the failure
+  and self-corrects — "roll a million dice" now gets a polite "max is 100"
+  instead of a hang, with zero prompt engineering.
+- **Schemas are deliberate now.** Explicit pydantic args models with per-field
+  `description=` and constraints (`ge`/`le`) replace docstring scraping.
+- **`interrupt()` is a pause, not a prompt.** The approval node checkpoints the
+  graph and stops the process; ANYTHING can resume it later with
+  `Command(resume=...)` on the same thread. On decline, every pending tool
+  call still gets a ToolMessage answer (the no-orphans invariant) so the model
+  can respond gracefully.
+- **The loop breaker** (`max_tool_loops`) exists because small local models can
+  ping-pong tool calls forever. Try `MAX_TOOL_LOOPS=0 uv run playtime` to see
+  it fire on the first call.
+
+Try:
+
+```bash
+uv run playtime
+# "roll a million dice"        → INVALID_ARGUMENTS → model self-corrects
+# "email bob@x.com hi"         → ⚠ approval card; y runs it (see var/outbox/), n declines
+# MAX_TOOL_LOOPS=0 uv run playtime → budget message on any tool use
+```

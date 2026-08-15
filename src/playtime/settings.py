@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     utility_model: str = "qwen-chat"
 
     gen_max_tokens: int = 1024  # per-response generation cap
+    max_tool_loops: int = 5  # circuit breaker: agent→tools round trips per user turn
 
 
 @lru_cache

@@ -1,36 +1,37 @@
-"""Stage 2: the ReAct loop as an explicit LangGraph graph.
+"""Stage 3: guardrails join the loop.
 
-    START → agent ⇄ tools
-              ↓
-             END
+    START → prepare → agent ⇄ tools
+                        ↓ ↖______
+                     approval    ↘
+                        ↓ (decline)
+                       END-ish (answers calls, back to agent)
 
-This is the standard ReAct shape before the prepare_context and approval
-nodes arrive (stages 3–4 here). LangGraph ships create_react_agent() that
-does all of this in one call — we hand-write it so the loop stays visible.
-
-Two ideas carry this file:
-
-1. STATE + REDUCER. AgentState is just a message list, but annotated with
-   add_messages: whatever a node RETURNS is appended/merged into state, not
-   assigned. Nodes never mutate; they emit updates.
-
-2. CHECKPOINTER = MEMORY. compile(checkpointer=...) saves state after every
-   node, keyed by thread_id. Invoking with the same thread_id resumes that
-   conversation; a new thread_id is a blank one. The LLM is as stateless as
-   in stage 1 — the graph re-sends the thread's history every turn. MemorySaver
-   lives in-process, so a restart forgets everything (stage 4: SQLite).
+New since stage 2:
+- prepare node: resets the per-turn tool-loop counter (grows into full context
+  management in stage 4).
+- loop breaker in agent: local models can ping-pong tool calls forever; after
+  max_tool_loops the turn ends with a partial-results message instead.
+- approval node: if any requested call has requires_approval, interrupt() pauses
+  the graph — state checkpointed, process free to do anything else — until
+  someone resumes it with a decision. Approve → run the calls; decline → the
+  calls are answered with a refusal ToolMessage (NEVER left unanswered: every
+  tool_call id must get a ToolMessage or the model breaks) and the agent gets
+  to respond gracefully.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.types import Command, interrupt
 
 from playtime.llm import make_llm
+from playtime.settings import get_settings
+from playtime.toolkit import execute
 from playtime.tools import TOOLS
 
 SYSTEM_PROMPT = (
@@ -39,52 +40,88 @@ SYSTEM_PROMPT = (
     "did something a tool does without actually calling it."
 )
 
+TOOL_BUDGET_MSG = (
+    "I hit my tool-call budget for this request — here's what I have so far. "
+    "Ask me to continue if you want me to keep going."
+)
+
+DECLINED_MSG = (
+    "USER DECLINED this action; it was NOT executed. Do not retry. "
+    "Acknowledge the decline and ask what they'd like instead."
+)
+
 
 class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
+    tool_loops: int  # no reducer → last write wins
 
 
 def build_graph():
-    tools_by_name = {t.name: t for t in TOOLS}
-    # bind_tools attaches the tools' JSON schemas to every request so the model
-    # can emit native tool_calls. Binding ≠ executing — that's the tools node.
-    llm = make_llm("agent").bind_tools(TOOLS)
+    registry = {t.name: t for t in TOOLS}
+    llm = make_llm("agent").bind_tools([t.openai_schema() for t in TOOLS])
+
+    def prepare(state: AgentState) -> dict:
+        return {"tool_loops": 0}
 
     def agent(state: AgentState) -> dict:
-        # System prompt is injected fresh each call, not stored in state:
-        # editing it later shouldn't require migrating saved conversations.
         resp = llm.invoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
-        return {"messages": [resp]}
+        loops = state.get("tool_loops", 0) + (1 if resp.tool_calls else 0)
+        if resp.tool_calls and loops > get_settings().max_tool_loops:
+            # Circuit breaker. Replacing the message (not appending) keeps the
+            # window clean: the over-budget tool_calls never enter state, so
+            # there are no orphaned calls to answer.
+            partial = resp.text
+            resp = AIMessage(content=(partial + "\n\n" if partial else "") + TOOL_BUDGET_MSG)
+        return {"messages": [resp], "tool_loops": loops}
 
     def route_after_agent(state: AgentState) -> str:
         last = state["messages"][-1]
-        return "tools" if getattr(last, "tool_calls", None) else END
+        calls = getattr(last, "tool_calls", None) or []
+        if not calls:
+            return END
+        if any(registry[c["name"]].requires_approval for c in calls if c["name"] in registry):
+            return "approval"
+        return "tools"
+
+    def approval(state: AgentState) -> Command:
+        last = state["messages"][-1]
+        gated = [c for c in last.tool_calls if registry.get(c["name"]) and registry[c["name"]].requires_approval]
+        card = "; ".join(f"{c['name']}({c['args']})" for c in gated)
+        # interrupt() checkpoints the graph and raises; the value is surfaced to
+        # whoever invoked us. On resume the NODE RE-RUNS from the top and
+        # interrupt() returns the resume value instead of raising.
+        decision = interrupt({"card": card})
+        if decision == "approve":
+            return Command(goto="tools")
+        refusals = [
+            ToolMessage(content=DECLINED_MSG, tool_call_id=c["id"], name=c["name"])
+            for c in last.tool_calls
+        ]
+        return Command(goto="agent", update={"messages": refusals})
 
     def tools(state: AgentState) -> dict:
-        """Execute every tool call in the last AI message. INVARIANT (models
-        break if violated): each tool_call gets exactly one ToolMessage answering
-        its id — even the failures, which is why errors are returned as results
-        instead of raised. The model reads the error and self-corrects."""
         last = state["messages"][-1]
         out = []
         for call in last.tool_calls:
-            t = tools_by_name.get(call["name"])
-            if t is None:
+            spec = registry.get(call["name"])
+            if spec is None:
                 content = f"ERROR: no tool named {call['name']!r}"
             else:
-                try:
-                    content = t.invoke(call["args"])  # raw: no timeout/caps yet
-                except Exception as e:
-                    content = f"ERROR: {e}"
-            out.append(ToolMessage(content=str(content), tool_call_id=call["id"], name=call["name"]))
+                content = execute(spec, call["args"])  # the guarded path, always
+            out.append(ToolMessage(content=content, tool_call_id=call["id"], name=call["name"]))
         return {"messages": out}
 
     g = StateGraph(AgentState)
+    g.add_node("prepare", prepare)
     g.add_node("agent", agent)
     g.add_node("tools", tools)
-    g.add_edge(START, "agent")
-    g.add_conditional_edges("agent", route_after_agent, {"tools": "tools", END: END})
-    g.add_edge("tools", "agent")  # the ReAct loop: results go back to the brain
+    g.add_node("approval", approval, destinations=("tools", "agent"))
+    g.add_edge(START, "prepare")
+    g.add_edge("prepare", "agent")
+    g.add_conditional_edges(
+        "agent", route_after_agent, {"tools": "tools", "approval": "approval", END: END}
+    )
+    g.add_edge("tools", "agent")
     return g.compile(checkpointer=MemorySaver())
 
 
