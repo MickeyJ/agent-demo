@@ -7,8 +7,8 @@ end to end.
 
 ## Roadmap
 
-1. **Hello, local model** — skeleton, `make_llm(role)`, smoke test, stateless REPL ← *you are here*
-2. **The ReAct loop** — LangGraph state/nodes/edges, checkpointer, two raw tools
+1. **Hello, local model** — skeleton, `make_llm(role)`, smoke test, stateless REPL
+2. **The ReAct loop** — LangGraph state/nodes/edges, checkpointer, two raw tools ← *you are here*
 3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval
 4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence
 5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent
@@ -43,3 +43,37 @@ uv sync
 uv run python scripts/smoke_llm.py   # must pass before anything else matters
 uv run playtime                      # chat; observe the amnesia
 ```
+
+## Stage 2 — The ReAct loop
+
+Files: `graph.py`, `tools.py` (new), `main.py` (rewritten).
+
+What to internalize here:
+
+- **Nodes emit updates; reducers merge them.** `AgentState.messages` is
+  annotated with `add_messages`, so what a node returns gets *appended*, never
+  assigned. This is the core LangGraph mental model.
+- **The loop is three pieces**: `agent` (LLM with tools bound), a conditional
+  edge (tool calls? → `tools`, else END), and `tools` (execute calls, return
+  `ToolMessage`s) looping back to `agent`. It's `smoke_llm.py`'s manual round
+  trip, automated. We hand-write the `tools` node instead of using LangGraph's
+  prebuilt `ToolNode`/`create_react_agent` so nothing is hidden.
+- **Memory = checkpointer, nothing else.** The graph saves state after every
+  node, keyed by `thread_id`. The LLM stays stateless; history is re-sent each
+  turn. `MemorySaver` is in-process → restart forgets everything (stage 4).
+- **One ToolMessage per tool_call id, always** — even for failures, which is
+  why the tools node returns errors as results instead of raising. Models
+  break on orphaned tool calls; the error-as-result lets them self-correct.
+
+Try:
+
+```bash
+uv run playtime
+# tell it your name → ask for it (memory works now)
+# "roll 3 dice", "shout hello for me" → watch ⚙ call / → result lines
+# /new → ask your name again (fresh thread knows nothing)
+# /thread t1 → it remembers again; restart the process → all gone
+```
+
+Planted flaws to find (stage 3 fixes them): tools have no timeout, no arg
+limits, no result caps — "roll a million dice" hangs the whole turn.
