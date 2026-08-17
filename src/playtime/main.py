@@ -11,6 +11,8 @@ any conversation.
 
 from __future__ import annotations
 
+import readline  # noqa: F401 — side-effect import: gives input() arrow keys + history
+
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
