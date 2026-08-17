@@ -76,16 +76,19 @@ def send_email(a: SendEmailArgs) -> str:
     return f"email to {a.to} saved to {path} (mock send)"
 
 
-TOOLS = [
-    ToolSpec(
-        name="shout",
-        description=(
-            "Format text as a shout: uppercase, emphasized. Use when the user asks "
-            "for text to be shouted, yelled, or emphasized. Returns the formatted text."
-        ),
-        args_model=ShoutArgs,
-        fn=shout,
+# Stage 5: shout left the master's menu — it's the stylist sub-agent's private
+# tool now (subagents.py imports this spec). The master delegates instead.
+SHOUT = ToolSpec(
+    name="shout",
+    description=(
+        "Format text as a shout: uppercase, emphasized. Use when the requested "
+        "style calls for shouting or all-caps. Returns the formatted text."
     ),
+    args_model=ShoutArgs,
+    fn=shout,
+)
+
+TOOLS = [
     ToolSpec(
         name="roll_dice",
         description=(

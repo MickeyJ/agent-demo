@@ -33,8 +33,11 @@ from langgraph.types import Command, interrupt
 from playtime.context import evicted_messages, trim_window, update_summary
 from playtime.llm import make_llm
 from playtime.settings import get_settings
+from playtime.subagents import SUBAGENTS
 from playtime.toolkit import execute
 from playtime.tools import REMEMBER_FACT, TOOLS
+
+ALL_TOOLS = TOOLS + SUBAGENTS
 
 SYSTEM_PROMPT = (
     "You are a concise, friendly assistant in a terminal chat. You have tools; "
@@ -76,8 +79,8 @@ def assemble_system(state: AgentState) -> SystemMessage:
 
 
 def build_graph(checkpointer=None):
-    registry = {t.name: t for t in TOOLS}
-    llm = make_llm("agent").bind_tools([t.openai_schema() for t in TOOLS])
+    registry = {t.name: t for t in ALL_TOOLS}
+    llm = make_llm("agent").bind_tools([t.openai_schema() for t in ALL_TOOLS])
 
     def prepare_context(state: AgentState) -> dict:
         out: dict = {"tool_loops": 0}

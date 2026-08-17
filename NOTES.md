@@ -10,8 +10,8 @@ end to end.
 1. **Hello, local model** — skeleton, `make_llm(role)`, smoke test, stateless REPL
 2. **The ReAct loop** — LangGraph state/nodes/edges, checkpointer, two raw tools
 3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval
-4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence ← *you are here*
-5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent
+4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence
+5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent ← *you are here*
 6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool
 
 ## Stage 1 — Hello, local model
@@ -150,4 +150,36 @@ CTX_WINDOW_BUDGET=250 uv run playtime   # tiny budget so trimming fires fast
 # ask for a few two-sentence stories → watch for the ✂ folded-into-summary line
 # /debug  → the exact layered prompt + per-message token costs
 # /quit, rerun, ask about old details → SQLite persistence
+```
+
+## Stage 5 — Sub-agents as tools
+
+Files: `subagents.py` (new), `tools.py` (SHOUT extracted, off the master's
+menu), `graph.py` (ALL_TOOLS = TOOLS + SUBAGENTS).
+
+A sub-agent is a tool whose implementation is another LLM. The master can't
+tell — same ToolSpec contract as roll_dice. What to internalize:
+
+- **Context isolation.** The sub-agent sees ONLY its args, never the
+  conversation. The master must pass everything relevant — watch it fail:
+  establish a fact in chat, then ask for a rewrite that depends on it.
+- **Private tools shrink the master's menu.** `shout` now belongs to the
+  stylist; the master delegates. This is the scaling answer to "30 tools
+  confuse a small model": group specialists behind sub-agents.
+- **An agent is a loop, not a framework.** The stylist's ReAct loop is ~10
+  lines of plain Python — no LangGraph. The framework buys checkpointing and
+  interrupts; a fire-and-forget sub-agent needs neither.
+- **Observability nests.** The master's stream shows only ⚙ stylist(...) →
+  result; the stylist's internal shout call is invisible here (Langfuse traces
+  would show every nested LLM call). Verified in testing: it does happen.
+- Sub-agents don't have to be in-process: the same contract works over HTTP
+  to a specialist running in another service.
+
+Try:
+
+```bash
+uv run playtime
+# 'shout "we are live"'          → master delegates: ⚙ stylist(...) (it has no shout of its own)
+# "rewrite that as a haiku"      → stylist again, different style
+# "write a tagline for X and have the critic review it"  → critic verdict
 ```
