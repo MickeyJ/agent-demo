@@ -11,10 +11,14 @@ dependencies = [
     "pydantic-settings>=2.6",
     "langgraph-checkpoint-sqlite>=3.1.1",
     "numpy>=2.5.2",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.52.3",
+    "python-multipart>=0.0.32",
 ]
 
 [project.scripts]
 playtime = "playtime.main:main"
+playtime-web = "playtime.web.app:main"
 
 [build-system]
 requires = ["hatchling"]

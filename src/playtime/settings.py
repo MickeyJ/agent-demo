@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     ctx_window_budget: int = 1500  # verbatim recent turns, in ~tokens
     summary_max_tokens: int = 300  # rolling summary generation cap
 
+    web_port: int = 9020  # stage 7 demo UI; free slot in the registry's tools range
+
 
 @lru_cache
 def get_settings() -> Settings:

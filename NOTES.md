@@ -12,8 +12,8 @@ end to end.
 3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval
 4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence
 5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent
-6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool ← *you are here*
-7. **Demo web UI** — FastAPI + SSE chat, approval cards, context panel, doc upload/paste
+6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool
+7. **Demo web UI** — FastAPI + SSE chat, approval cards, context panel, doc upload/paste ← *you are here*
 
 ## Stage 1 — Hello, local model
 
@@ -219,4 +219,35 @@ uv run python scripts/seed_docs.py     # idempotent; 6 mock wiki docs
 uv run playtime
 # "what's the guest wifi password?"   → ⚙ search_docs → rollforinitiative
 # "how many PTO days do I get?"       → 23, from the HR doc
+```
+
+## Stage 7 — Demo web UI
+
+Files: `web/app.py` (FastAPI), `web/static/` (hand-written HTML/CSS/JS, no
+build step, no CDN), `settings.py` (web_port 9020).
+
+Nothing agent-side changed — that's the lesson. The graph, tools, context
+machinery, and SQLite checkpoints are channel-agnostic; the web UI and the CLI
+REPL are two skins over the same threads (open t1 in both and compare).
+
+- **A turn is a stream.** POST /api/chat answers with SSE events — tool_call,
+  tool_result, assistant, trim, approval, done — which is exactly main.py's
+  run_turn() serialized. The frontend only renders; all agent concepts arrive
+  as events.
+- **Approvals become buttons.** The interrupt() card streams out as an
+  `approval` event; Approve/Decline POSTs /api/resume, which streams the
+  continuation. Same checkpoint mechanics as the REPL's y/N.
+- **The Context tab is /debug, visualized**: window-budget gauge, pinned
+  facts, rolling summary — refreshed after every turn.
+- **The Docs tab exposes the RAG pipeline**: paste text or upload .txt/.md
+  (same ingest path), list/delete docs, and a raw test-search box showing
+  scored chunks — retrieval demoable without the agent in the way.
+
+Demo flow: Docs tab → paste a memo with a made-up fact → test-search it →
+back to chat → ask the agent → watch ⚙ search_docs cite your memo.
+
+Try:
+
+```bash
+uv run playtime-web    # → http://127.0.0.1:9020 (host-only)
 ```

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>agent-playtime</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>agent-playtime</h1>
+    <div class="thread-controls">
+      <select id="thread-select" title="thread"></select>
+      <button id="new-thread" title="new thread">+ new</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="chat">
+      <div id="messages"></div>
+      <form id="composer" autocomplete="off">
+        <input id="prompt" placeholder="Message the agent… (try: what's the guest wifi password?)" autofocus>
+        <button id="send" type="submit">Send</button>
+      </form>
+    </section>
+
+    <aside id="sidebar">
+      <nav id="tabs">
+        <button class="tab active" data-tab="context">Context</button>
+        <button class="tab" data-tab="docs">Docs</button>
+      </nav>
+
+      <div id="tab-context" class="tab-panel active">
+        <h2>Window budget</h2>
+        <div class="gauge"><div id="gauge-fill"></div></div>
+        <div id="gauge-label" class="muted">–</div>
+
+        <h2>Pinned facts</h2>
+        <dl id="pinned" class="muted">none yet — ask the agent to remember something</dl>
+
+        <h2>Rolling summary</h2>
+        <p id="summary" class="muted">empty — appears once old turns get trimmed</p>
+      </div>
+
+      <div id="tab-docs" class="tab-panel">
+        <h2>Add a document</h2>
+        <form id="doc-form">
+          <input id="doc-title" placeholder="Title (optional for uploads)">
+          <textarea id="doc-text" rows="5" placeholder="Paste text here…"></textarea>
+          <div class="row">
+            <input id="doc-file" type="file" accept=".txt,.md,.markdown">
+            <button type="submit">Ingest</button>
+          </div>
+        </form>
+        <div id="doc-status" class="muted"></div>
+
+        <h2>Documents</h2>
+        <ul id="doc-list"></ul>
+
+        <h2>Test retrieval (raw, no agent)</h2>
+        <form id="search-form">
+          <input id="search-q" placeholder="e.g. vacation days">
+        </form>
+        <div id="search-hits"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
