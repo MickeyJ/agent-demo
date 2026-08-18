@@ -232,8 +232,30 @@ select {
 #search-hits .hit .src { color: var(--muted); }
 #search-hits .hit p { margin-top: 5px; white-space: pre-wrap; max-height: 130px; overflow-y: auto; }
 
+#panel-toggle { display: none; }
+
 @media (max-width: 900px) {
-  main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
-  #sidebar { border-left: none; border-top: 1px solid var(--line); max-height: 45vh; }
-  .msg, details.tool, .approval { max-width: 90%; }
+  main { grid-template-columns: 1fr; }
+
+  /* Sidebar becomes a bottom sheet, toggled from the header. */
+  #panel-toggle { display: block; }
+  #sidebar {
+    display: none;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: min(72vh, 560px);
+    border-left: none;
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, .25);
+    z-index: 10;
+  }
+  #sidebar.open { display: flex; }
+
+  header { padding: 8px 12px; }
+  #messages { padding: 14px; gap: 8px; }
+  .msg, details.tool, .approval { max-width: 88%; }
+  #composer { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  /* 16px inputs stop iOS Safari from zooming the page on focus. */
+  #prompt, #doc-form input, #doc-form textarea, #search-form input, select { font-size: 16px; }
 }

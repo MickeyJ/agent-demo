@@ -3,8 +3,16 @@
    every agent concept (tools, approvals, trimming) arrives as an SSE event. */
 
 const $ = (id) => document.getElementById(id);
-let thread = "t1";
 let busy = false;
+
+/* Each browser gets its own sticky thread (concurrent visitors must not share
+   t1 — two people interleaving one checkpoint thread is chaos). */
+let thread = localStorage.getItem("playtime-thread");
+if (!thread) {
+  thread = "w-" + Math.random().toString(36).slice(2, 7);
+  localStorage.setItem("playtime-thread", thread);
+}
+const rememberThread = () => localStorage.setItem("playtime-thread", thread);
 
 /* ---------- tiny helpers ---------- */
 
@@ -131,28 +139,29 @@ $("composer").onsubmit = (e) => {
 
 async function loadThreads() {
   const { threads } = await (await fetch("/api/threads")).json();
-  if (!threads.length) threads.push("t1");
-  if (!threads.includes(thread)) thread = threads[threads.length - 1];
+  if (!threads.includes(thread)) threads.push(thread); // ours may be unborn
   $("thread-select").innerHTML = threads
+    .sort()
     .map((t) => `<option ${t === thread ? "selected" : ""}>${esc(t)}</option>`)
     .join("");
 }
 
 $("thread-select").onchange = async (e) => {
   thread = e.target.value;
+  rememberThread();
   await renderTranscript();
 };
 
 $("new-thread").onclick = async () => {
-  const { threads } = await (await fetch("/api/threads")).json();
-  let n = 1;
-  while (threads.includes(`t${n}`)) n++;
-  thread = `t${n}`;
+  thread = "w-" + Math.random().toString(36).slice(2, 7);
+  rememberThread();
   await loadThreads();
   $("messages").innerHTML = "";
   refreshContext();
   $("prompt").focus();
 };
+
+$("panel-toggle").onclick = () => $("sidebar").classList.toggle("open");
 
 async function renderTranscript() {
   const s = await (await fetch(`/api/state/${encodeURIComponent(thread)}`)).json();

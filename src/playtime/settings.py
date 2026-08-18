@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +35,8 @@ class Settings(BaseSettings):
     ctx_window_budget: int = 1500  # verbatim recent turns, in ~tokens
     summary_max_tokens: int = 300  # rolling summary generation cap
 
-    web_port: int = 9020  # stage 7 demo UI; free slot in the registry's tools range
+    # Demo UI port. infra-run units inject PORT; standalone runs fall back.
+    web_port: int = Field(9020, validation_alias=AliasChoices("PORT", "WEB_PORT"))
 
 
 @lru_cache
