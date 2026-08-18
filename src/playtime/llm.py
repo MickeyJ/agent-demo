@@ -5,7 +5,7 @@ cloud failover). No other file may import langchain_openai or know a base URL.
 
 from __future__ import annotations
 
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from playtime.settings import get_settings
 
@@ -29,4 +29,16 @@ def make_llm(role: str = "agent", **kw) -> ChatOpenAI:
         timeout=kw.pop("timeout", 120),
         extra_body=extra_body or None,
         **kw,
+    )
+
+
+def make_embeddings() -> OpenAIEmbeddings:
+    s = get_settings()
+    return OpenAIEmbeddings(
+        model=s.embed_model,
+        base_url=s.litellm_base_url,
+        api_key=s.litellm_api_key,
+        # Send raw strings: by default this class pre-tokenizes with OpenAI's
+        # tiktoken and sends token arrays, which vLLM-backed proxies reject.
+        check_embedding_ctx_length=False,
     )

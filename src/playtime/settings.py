@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # arrives in stage 4). Swapping either is a .env edit, not a code change.
     agent_model: str = "qwen-chat"
     utility_model: str = "qwen-chat"
+    embed_model: str = "embeddings"  # router alias → local vllm-embed
 
     gen_max_tokens: int = 1024  # per-response generation cap
     max_tool_loops: int = 5  # circuit breaker: agent→tools round trips per user turn

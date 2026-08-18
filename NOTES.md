@@ -11,8 +11,9 @@ end to end.
 2. **The ReAct loop** — LangGraph state/nodes/edges, checkpointer, two raw tools
 3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval
 4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence
-5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent ← *you are here*
-6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool
+5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent
+6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool ← *you are here*
+7. **Demo web UI** — FastAPI + SSE chat, approval cards, context panel, doc upload/paste
 
 ## Stage 1 — Hello, local model
 
@@ -182,4 +183,40 @@ uv run playtime
 # 'shout "we are live"'          → master delegates: ⚙ stylist(...) (it has no shout of its own)
 # "rewrite that as a haiku"      → stylist again, different style
 # "write a tagline for X and have the critic review it"  → critic verdict
+```
+
+## Stage 6 — Mini RAG
+
+Files: `rag.py` (new), `scripts/seed_docs.py` (new), `llm.py` (make_embeddings),
+`graph.py` (+ SEARCH_DOCS).
+
+RAG demystified — the whole thing is two paths in one file:
+
+    ingest:  text → chunk → embed → sqlite blobs
+    search:  query → embed → cosine vs all chunks → top-k → tool result
+
+What to internalize:
+
+- **Retrieval is just nearest-neighbor text.** No vector DB until the corpus
+  outgrows RAM — numpy cosine over hundreds of chunks is instant. The
+  embeddings come from the router's `embeddings` alias (local vllm-embed).
+- **Chunk size is THE tuning knob** (chunk_text max_chars): too big → hits
+  flood the window budget; too small → chunks lose their meaning.
+- **The tool description does heavy lifting**: "always search before saying
+  you don't know" is what makes the model reach for the KB instead of
+  hallucinating or apologizing.
+- **Retrieved text becomes context like anything else** — once a search result
+  is in the window, follow-up questions can be answered from it without
+  another search (watch: ask about wifi, then the mascot — the second answer
+  rides on the first search's excerpts).
+- Facts are deliberately unknowable (Dicecorp's mascot axolotl) so you can
+  tell retrieval from pretraining.
+
+Try:
+
+```bash
+uv run python scripts/seed_docs.py     # idempotent; 6 mock wiki docs
+uv run playtime
+# "what's the guest wifi password?"   → ⚙ search_docs → rollforinitiative
+# "how many PTO days do I get?"       → 23, from the HR doc
 ```

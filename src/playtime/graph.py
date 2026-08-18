@@ -33,11 +33,12 @@ from langgraph.types import Command, interrupt
 from playtime.context import evicted_messages, trim_window, update_summary
 from playtime.llm import make_llm
 from playtime.settings import get_settings
+from playtime.rag import SEARCH_DOCS
 from playtime.subagents import SUBAGENTS
 from playtime.toolkit import execute
 from playtime.tools import REMEMBER_FACT, TOOLS
 
-ALL_TOOLS = TOOLS + SUBAGENTS
+ALL_TOOLS = TOOLS + SUBAGENTS + [SEARCH_DOCS]
 
 SYSTEM_PROMPT = (
     "You are a concise, friendly assistant in a terminal chat. You have tools; "

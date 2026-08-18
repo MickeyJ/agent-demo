@@ -72,7 +72,7 @@ def main() -> None:
     graph = build_graph()
     thread = "t1"
     counter = 1
-    print(f"agent-playtime stage 5 (sub-agents). {HELP}")
+    print(f"agent-playtime stage 6 (mini RAG). {HELP}")
     while True:
         try:
             user = input(f"\n[{thread}] you> ").strip()
