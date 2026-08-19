@@ -5,14 +5,21 @@
 const $ = (id) => document.getElementById(id);
 let busy = false;
 
-/* Each browser gets its own sticky thread (concurrent visitors must not share
-   t1 — two people interleaving one checkpoint thread is chaos). */
-let thread = localStorage.getItem("playtime-thread");
-if (!thread) {
-  thread = "w-" + Math.random().toString(36).slice(2, 7);
+/* Which conversation are we in? ?c=<id> wins (shareable/bookmarkable link),
+   else this browser's sticky thread, else a fresh one — concurrent visitors
+   must not share a thread: two people interleaving one checkpoint is chaos. */
+const newThreadId = () => "w-" + Math.random().toString(36).slice(2, 7);
+let thread =
+  new URLSearchParams(location.search).get("c") ||
+  localStorage.getItem("playtime-thread") ||
+  newThreadId();
+
+function rememberThread() {
   localStorage.setItem("playtime-thread", thread);
+  const url = new URL(location);
+  url.searchParams.set("c", thread);
+  history.replaceState({}, "", url); // URL always names the open conversation
 }
-const rememberThread = () => localStorage.setItem("playtime-thread", thread);
 
 /* ---------- tiny helpers ---------- */
 
@@ -33,7 +40,7 @@ function el(html) {
 
 /* Epoch seconds → "8/18 1:07:23 pm" in the viewer's own timezone. */
 function fmtTs(ts) {
-  const d = ts ? new Date(ts * 1000) : new Date();
+  const d = new Date(ts * 1000);
   const pad = (n) => String(n).padStart(2, "0");
   const h24 = d.getHours();
   const h = h24 % 12 || 12;
@@ -42,9 +49,12 @@ function fmtTs(ts) {
   )} ${h24 < 12 ? "am" : "pm"}`;
 }
 
-/* A chat bubble is a timestamp line + the bubble itself. */
+/* A chat bubble, with its timestamp line when we have a real one. Messages
+   from before stamping existed carry no ts — show nothing rather than invent
+   a time (a fabricated "now" made every old message read identically). */
 function bubble(who, html, ts) {
-  const row = el(`<div class="turn ${who}"><div class="ts">${fmtTs(ts)}</div></div>`);
+  const row = el(`<div class="turn ${who}"></div>`);
+  if (ts) row.appendChild(el(`<div class="ts">${fmtTs(ts)}</div>`));
   row.appendChild(el(`<div class="msg ${who}">${html}</div>`));
   return row;
 }
@@ -149,7 +159,9 @@ $("composer").onsubmit = (e) => {
   const text = $("prompt").value.trim();
   if (!text || busy) return;
   $("prompt").value = "";
-  addToChat(bubble("user", esc(text)));
+  // Rendered optimistically before the server sees it — this local clock read
+  // is a real send time, not a placeholder.
+  addToChat(bubble("user", esc(text), Date.now() / 1000));
   streamTurn("/api/chat", { thread, message: text });
 };
 
@@ -171,7 +183,7 @@ $("thread-select").onchange = async (e) => {
 };
 
 $("new-thread").onclick = async () => {
-  thread = "w-" + Math.random().toString(36).slice(2, 7);
+  thread = newThreadId();
   rememberThread();
   await loadThreads();
   $("messages").innerHTML = "";
@@ -298,6 +310,7 @@ $("search-form").onsubmit = (e) => e.preventDefault();
 /* ---------- boot ---------- */
 
 (async () => {
+  rememberThread();
   await loadThreads();
   await renderTranscript();
 })();

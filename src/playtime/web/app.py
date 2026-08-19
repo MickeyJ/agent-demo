@@ -34,6 +34,7 @@ from playtime.rag import delete_doc, ingest, list_docs, search
 from playtime.settings import get_settings
 
 STATIC = Path(__file__).parent / "static"
+NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
 
 app = FastAPI(title="agent-playtime")
 graph = build_graph()
@@ -191,10 +192,21 @@ def docs_search(q: str):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(STATIC / "index.html", headers=NO_CACHE)
 
 
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+class NoCacheStatic(StaticFiles):
+    """Demo-grade cache policy: always revalidate. A browser holding an old
+    app.js against a new style.css renders a broken page (the bubbles lose
+    their alignment) — for files this small, correctness beats caching."""
+
+    def file_response(self, *args, **kw):
+        resp = super().file_response(*args, **kw)
+        resp.headers.update(NO_CACHE)
+        return resp
+
+
+app.mount("/static", NoCacheStatic(directory=STATIC), name="static")
 
 
 def main() -> None:

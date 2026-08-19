@@ -38,6 +38,7 @@ body {
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden; /* nothing may push the page sideways */
 }
 
 header {
@@ -269,7 +270,14 @@ select {
   }
   #sidebar.open { display: flex; }
 
-  header { padding: 8px 12px; }
+  /* The header must fit one row at 390px or the whole page scrolls sideways
+     and clips the composer: drop the label, shrink the title, cap the select. */
+  header { padding: 8px 10px; gap: 8px; }
+  header h1 { font-size: 14px; white-space: nowrap; }
+  .thread-controls { gap: 6px; min-width: 0; }
+  .thread-controls label { display: none; }
+  #thread-select { max-width: 34vw; padding: 7px 6px; }
+  #new-thread, #panel-toggle { padding: 8px 10px; }
   #messages { padding: 14px; gap: 8px; }
   .turn, details.tool, .approval { max-width: 88%; }
   #composer { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
