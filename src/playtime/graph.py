@@ -20,6 +20,7 @@ the conversation, summary, and pinned facts are all still there.
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 from typing import Annotated, TypedDict
 
@@ -55,6 +56,13 @@ DECLINED_MSG = (
     "USER DECLINED this action; it was NOT executed. Do not retry. "
     "Acknowledge the decline and ask what they'd like instead."
 )
+
+
+def stamp(m):
+    """Record when a message was created, in additional_kwargs so it rides along
+    into the checkpoint — the web UI shows times on reload, not just live."""
+    m.additional_kwargs["ts"] = time.time()
+    return m
 
 
 def merge_pinned(a: dict | None, b: dict | None) -> dict:
@@ -104,7 +112,7 @@ def build_graph(checkpointer=None):
         if resp.tool_calls and loops > get_settings().max_tool_loops:
             partial = resp.text
             resp = AIMessage(content=(partial + "\n\n" if partial else "") + TOOL_BUDGET_MSG)
-        return {"messages": [resp], "tool_loops": loops}
+        return {"messages": [stamp(resp)], "tool_loops": loops}
 
     def route_after_agent(state: AgentState) -> str:
         last = state["messages"][-1]

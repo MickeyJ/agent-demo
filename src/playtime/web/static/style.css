@@ -74,9 +74,20 @@ main {
   flex-direction: column;
   gap: 10px;
 }
-.msg { max-width: 72%; padding: 9px 13px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: break-word; }
-.msg.user { align-self: flex-end; background: var(--user-bubble); color: var(--user-ink); border-bottom-right-radius: 4px; }
-.msg.bot { align-self: flex-start; background: var(--bot-bubble); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+/* a turn = timestamp line + bubble, aligned as one unit */
+.turn { display: flex; flex-direction: column; max-width: 72%; gap: 3px; }
+.turn.user { align-self: flex-end; align-items: flex-end; }
+.turn.bot { align-self: flex-start; align-items: flex-start; }
+.turn .ts {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+}
+
+.msg { padding: 9px 13px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: break-word; }
+.msg.user { background: var(--user-bubble); color: var(--user-ink); border-bottom-right-radius: 4px; }
+.msg.bot { background: var(--bot-bubble); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
 .msg.bot code { font-family: var(--mono); font-size: 13px; background: var(--chip); padding: 1px 5px; border-radius: 5px; }
 
 details.tool {
@@ -260,7 +271,7 @@ select {
 
   header { padding: 8px 12px; }
   #messages { padding: 14px; gap: 8px; }
-  .msg, details.tool, .approval { max-width: 88%; }
+  .turn, details.tool, .approval { max-width: 88%; }
   #composer { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
   /* 16px inputs stop iOS Safari from zooming the page on focus. */
   #prompt, #doc-form input, #doc-form textarea, #search-form input, select { font-size: 16px; }

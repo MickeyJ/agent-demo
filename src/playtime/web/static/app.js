@@ -31,6 +31,24 @@ function el(html) {
   return t.content.firstChild;
 }
 
+/* Epoch seconds → "8/18 1:07:23 pm" in the viewer's own timezone. */
+function fmtTs(ts) {
+  const d = ts ? new Date(ts * 1000) : new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const h24 = d.getHours();
+  const h = h24 % 12 || 12;
+  return `${d.getMonth() + 1}/${d.getDate()} ${h}:${pad(d.getMinutes())}:${pad(
+    d.getSeconds()
+  )} ${h24 < 12 ? "am" : "pm"}`;
+}
+
+/* A chat bubble is a timestamp line + the bubble itself. */
+function bubble(who, html, ts) {
+  const row = el(`<div class="turn ${who}"><div class="ts">${fmtTs(ts)}</div></div>`);
+  row.appendChild(el(`<div class="msg ${who}">${html}</div>`));
+  return row;
+}
+
 function addToChat(node) {
   $("messages").appendChild(node);
   $("messages").scrollTop = $("messages").scrollHeight;
@@ -56,7 +74,7 @@ function renderEvent(ev) {
       chip.classList.add("done");
     }
   } else if (ev.type === "assistant") {
-    addToChat(el(`<div class="msg bot">${md(ev.text)}</div>`));
+    addToChat(bubble("bot", md(ev.text), ev.ts));
   } else if (ev.type === "trim") {
     addToChat(
       el(`<div class="trim-note">folded ${ev.folded} old messages into the summary</div>`)
@@ -131,7 +149,7 @@ $("composer").onsubmit = (e) => {
   const text = $("prompt").value.trim();
   if (!text || busy) return;
   $("prompt").value = "";
-  addToChat(el(`<div class="msg user">${esc(text)}</div>`));
+  addToChat(bubble("user", esc(text)));
   streamTurn("/api/chat", { thread, message: text });
 };
 
@@ -169,7 +187,7 @@ async function renderTranscript() {
   if (s.summary)
     addToChat(el(`<div class="trim-note">older turns live in the summary (Context tab)</div>`));
   for (const m of s.messages) {
-    if (m.kind === "human") addToChat(el(`<div class="msg user">${esc(m.text)}</div>`));
+    if (m.kind === "human") addToChat(bubble("user", esc(m.text), m.ts));
     else if (m.kind === "ai") {
       for (const c of m.tool_calls)
         addToChat(
@@ -177,7 +195,7 @@ async function renderTranscript() {
             JSON.stringify(c.args)
           )})</summary><pre>(see next result)</pre></details>`)
         );
-      if (m.text) addToChat(el(`<div class="msg bot">${md(m.text)}</div>`));
+      if (m.text) addToChat(bubble("bot", md(m.text), m.ts));
     } else if (m.kind === "tool") {
       const chips = [...$("messages").querySelectorAll("details.tool")];
       const open = chips.reverse().find((c) => c.querySelector("pre").textContent === "(see next result)");

@@ -29,7 +29,7 @@ from langgraph.types import Command
 from pydantic import BaseModel
 
 from playtime.context import count_message_tokens
-from playtime.graph import build_graph, thread_config
+from playtime.graph import build_graph, stamp, thread_config
 from playtime.rag import delete_doc, ingest, list_docs, search
 from playtime.settings import get_settings
 
@@ -71,7 +71,11 @@ def _turn_events(thread: str, payload):
                     for c in m.tool_calls:
                         yield {"type": "tool_call", "name": c["name"], "args": c["args"]}
                     if m.text:
-                        yield {"type": "assistant", "text": m.text}
+                        yield {
+                            "type": "assistant",
+                            "text": m.text,
+                            "ts": m.additional_kwargs.get("ts"),
+                        }
                 elif isinstance(m, ToolMessage):
                     yield {"type": "tool_result", "name": m.name, "text": m.text}
     if card is not None:
@@ -86,7 +90,7 @@ def _sse(events):
 
 @app.post("/api/chat")
 def chat(body: ChatIn):
-    payload = {"messages": [HumanMessage(body.message)]}
+    payload = {"messages": [stamp(HumanMessage(body.message))]}
     return StreamingResponse(
         _sse(_turn_events(body.thread, payload)), media_type="text/event-stream"
     )
@@ -133,6 +137,7 @@ def state(thread: str):
                 "kind": type(m).__name__.removesuffix("Message").lower(),
                 "tokens": count_message_tokens([m]),
                 "text": m.text,
+                "ts": m.additional_kwargs.get("ts"),
                 "tool_calls": [
                     {"name": c["name"], "args": c["args"]}
                     for c in (getattr(m, "tool_calls", None) or [])

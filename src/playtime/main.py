@@ -17,7 +17,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
 from playtime.context import count_message_tokens
-from playtime.graph import assemble_system, build_graph, thread_config
+from playtime.graph import assemble_system, build_graph, stamp, thread_config
 from playtime.settings import get_settings
 
 HELP = "commands: /debug (context state) | /new (fresh thread) | /thread <name> (switch) | /quit"
@@ -96,7 +96,7 @@ def main() -> None:
             print(f"(on thread {thread})")
             continue
 
-        payload: dict | Command = {"messages": [HumanMessage(user)]}
+        payload: dict | Command = {"messages": [stamp(HumanMessage(user))]}
         while True:
             card = run_turn(graph, payload, thread_config(thread))
             if card is None:
