@@ -1,9 +1,33 @@
-# agent-playtime — stage notes
+# agent-playtime
 
-A minimal, staged playground for learning:
-local models via LiteLLM, LangGraph, context/memory management, tool contracts,
-guardrails, sub-agents, and a toy RAG tool. Each stage is small enough to read
-end to end.
+A small, staged playground for learning how LLM agents actually work: local
+models behind an OpenAI-compatible proxy, LangGraph, context and memory
+management, tool contracts, guardrails, sub-agents, and a toy RAG tool. Each
+stage adds one idea and is small enough to read end to end — the whole thing
+is under 2,000 lines, and the stage notes below say what each piece is for.
+
+## Setup
+
+You need an OpenAI-compatible chat-completions endpoint and an embeddings
+endpoint. The code was written against a [LiteLLM](https://docs.litellm.ai)
+proxy routing to a local vLLM Qwen model, but anything that speaks the OpenAI
+API works (OpenAI itself, Ollama, a bare vLLM server). Model names are
+aliases; `.env` decides what backs them.
+
+```bash
+cp .env.example .env            # set LITELLM_BASE_URL / LITELLM_API_KEY / model aliases
+uv sync
+uv run python scripts/smoke_llm.py   # must pass: proves the tool-calling round trip
+uv run playtime                      # terminal chat
+uv run playtime-web                  # demo web UI at http://127.0.0.1:9020
+```
+
+Everything the app writes lives under `var/` (SQLite checkpoints, the RAG
+store, a mock email outbox) and is gitignored.
+
+The web UI is a host-only demo: no authentication, and anyone who can reach
+it can upload documents into the RAG store. Put it behind something before
+exposing it.
 
 ## Roadmap
 
@@ -12,8 +36,10 @@ end to end.
 3. **Tool contract + guardrails** — ToolSpec, validation, timeouts, loop breaker, `interrupt()` approval
 4. **Context & memory** — token budgets, window trimming, rolling summary, pinned facts, SQLite persistence
 5. **Sub-agents as tools** — stylist + critic agents wrapped as tools of the master agent
-6. **Mini RAG** — mock wiki docs, proxy embeddings, `search_docs` tool
-7. **Demo web UI** — FastAPI + SSE chat, approval cards, context panel, doc upload/paste ← *you are here*
+6. **Mini RAG** — mock wiki docs, embeddings, `search_docs` tool
+7. **Demo web UI** — FastAPI + SSE chat, approval cards, context panel, doc upload/paste
+
+All seven stages are in place; the notes below walk them in order.
 
 ## Stage 1 — Hello, local model
 
@@ -23,19 +49,20 @@ What to internalize here:
 
 - **The proxy is the seam.** `llm.py` is the only file that knows a base URL or
   imports `langchain_openai`. The `qwen-chat` alias is whatever the router
-  serves — local vLLM when enabled, cloud failover otherwise. The REPL prints
-  `bot (<model>)` so you always know who actually answered.
+  serves — a local model when one is up, a cloud failover otherwise. The REPL
+  prints `bot (<model>)` so you always know who actually answered.
 - **Roles, not models.** Code asks for `"agent"` or `"utility"`; `.env` decides
-  what backs each. A common production split is a hosted brain + local utility.
+  what backs each. A common production split is a hosted brain plus a cheap
+  local utility model.
 - **An LLM call is stateless.** The REPL sends only `[system, current message]`.
   Tell it your name, then ask for it — it can't know. "Memory" is always just
   context you re-send; the rest of this project is about assembling that
   context well.
-- **The smoke test is load-bearing** (rule: run it after any
-  model change). It proves the *native tool-calling round trip*: model emits
-  `tool_calls` → you run the tool → you append an `AIMessage` + `ToolMessage`
-  pair → model produces a final answer. That exact message shape is the inner
-  loop of every agent framework; LangGraph just automates it.
+- **The smoke test is load-bearing** — run it after any model change. It
+  proves the *native tool-calling round trip*: model emits `tool_calls` → you
+  run the tool → you append an `AIMessage` + `ToolMessage` pair → model
+  produces a final answer. That exact message shape is the inner loop of every
+  agent framework; LangGraph just automates it.
 
 Try:
 
@@ -171,8 +198,9 @@ tell — same ToolSpec contract as roll_dice. What to internalize:
   lines of plain Python — no LangGraph. The framework buys checkpointing and
   interrupts; a fire-and-forget sub-agent needs neither.
 - **Observability nests.** The master's stream shows only ⚙ stylist(...) →
-  result; the stylist's internal shout call is invisible here (Langfuse traces
-  would show every nested LLM call). Verified in testing: it does happen.
+  result; the stylist's internal shout call is invisible here (a tracing
+  layer such as Langfuse would show every nested LLM call). Verified in
+  testing: it does happen.
 - Sub-agents don't have to be in-process: the same contract works over HTTP
   to a specialist running in another service.
 
@@ -199,7 +227,7 @@ What to internalize:
 
 - **Retrieval is just nearest-neighbor text.** No vector DB until the corpus
   outgrows RAM — numpy cosine over hundreds of chunks is instant. The
-  embeddings come from the router's `embeddings` alias (local vllm-embed).
+  embeddings come from the proxy's `embeddings` alias (any embedding model).
 - **Chunk size is THE tuning knob** (chunk_text max_chars): too big → hits
   flood the window budget; too small → chunks lose their meaning.
 - **The tool description does heavy lifting**: "always search before saying
@@ -250,4 +278,5 @@ Try:
 
 ```bash
 uv run playtime-web    # → http://127.0.0.1:9020 (host-only)
+# PORT=9999 uv run playtime-web to pick another port
 ```
